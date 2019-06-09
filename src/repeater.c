@@ -82,6 +82,11 @@ int start_repeater(char* logfile)
         fprintf(stderr, "Could not open log file: %s\n", logfile);
         exit(1);
     }
+    rc = setvbuf(logfd, NULL, _IOLBF, 1024); // Line buffer output up to 1024 characters
+    if (rc < 0) {
+        perror("Setting _IOLBF on logfile");
+        exit(1);
+    }
     stdout = logfd;
     stderr = logfd;
 
@@ -286,8 +291,10 @@ static int verify_config()
  */
 void create_listener(int id, uint32_t address, uint16_t port)
 {
-    int     socket;
-    bool    exit_now = false;
+    int         socket;
+    bool        exit_now = false;
+    int         buffer_size = 0;
+    socklen_t   optlen = sizeof(buffer_size);
 
     // Error checking
     if (id <= 0) {
@@ -304,6 +311,19 @@ void create_listener(int id, uint32_t address, uint16_t port)
 
     // Create the listener socket (adding it to poll_fds)
     socket = open_socket(address, port);
+
+    // Log the RCVBUF size
+    buffer_size = 0;
+    optlen = sizeof(buffer_size);
+    if (getsockopt(socket, SOL_SOCKET, SO_RCVBUF, &buffer_size, &optlen) < 0) {
+        perror("Getting SO_RCVBUF");
+    } else {
+        struct in_addr ip_addr;
+        ip_addr.s_addr = address;
+        printf("Listener socket (%s:%d) receive buffer size = %d bytes\n",
+                inet_ntoa(ip_addr), port, buffer_size);
+    }
+
     // Set the listener_ids array to point to the given ID for this socket
     listener_ids[socket] = id;
 }
@@ -324,6 +344,7 @@ void create_transmitter(int id, uint32_t address, uint16_t port)
     transmitter_t   *transmitter = NULL;
     int             socket;
     int             buffer_size = SOCKET_SEND_BUFFER;
+    socklen_t       optlen = sizeof(buffer_size);
     bool            exit_now = false;
 
     // Error checking
@@ -343,10 +364,23 @@ void create_transmitter(int id, uint32_t address, uint16_t port)
     // Create the transmitter socket (and add to poll_fds)
     socket = open_socket(address, port);
     // Increase the sockets send buffer
-    if (setsockopt(socket, SOL_SOCKET, SO_SNDBUF, &buffer_size, sizeof(buffer_size)) < 0) {
+    if (setsockopt(socket, SOL_SOCKET, SO_SNDBUF, &buffer_size, optlen) < 0) {
         perror("Setting SO_SNDBUF");
         exit(1);
     }
+
+    // Log the SNDBUF size
+    buffer_size = 0;
+    optlen = sizeof(buffer_size);
+    if (getsockopt(socket, SOL_SOCKET, SO_SNDBUF, &buffer_size, &optlen) < 0) {
+        perror("Getting SO_RCVBUF");
+    } else {
+        struct in_addr ip_addr;
+        ip_addr.s_addr = address;
+        printf("Transmitter socket (%s:%d) send buffer size = %d bytes\n",
+                inet_ntoa(ip_addr), port, buffer_size);
+    }
+
     // listener ID -1 indicates this socket is for a transmitter
     listener_ids[socket] = -1;
 
